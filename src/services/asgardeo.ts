@@ -18,13 +18,24 @@ import { generateVerifier, generateChallenge } from './pkce';
 // App-native API. This is a fixed base64-encoded value — does not change per tenant.
 const BASIC_AUTHENTICATOR_ID = 'QmFzaWNBdXRoZW50aWNhdG9y';
 
+interface Authenticator {
+  authenticatorId: string;
+  displayName?: string;
+}
+
 interface InitiateResult {
   flowId: string;
   verifier: string;
+  authenticators: Authenticator[];
 }
 
 interface AuthorizeResponse {
   flowId?: string;
+  flowStatus?: string;
+  nextStep?: {
+    stepType: string;
+    authenticators?: Authenticator[];
+  };
   error?: string;
   errorDescription?: string;
 }
@@ -55,6 +66,13 @@ export async function initiateAuthFlow(email: string): Promise<InitiateResult> {
     login_hint: email,
   });
 
+  console.log('[initiateAuthFlow] POST to', `${config.asgardeo.baseUrl}/oauth2/authorize`);
+  console.log('[initiateAuthFlow] Params:', {
+    client_id: config.asgardeo.clientId,
+    redirect_uri: config.asgardeo.redirectUri,
+    scope: config.asgardeo.scopes,
+  });
+
   const res = await fetch(`${config.asgardeo.baseUrl}/oauth2/authorize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -64,19 +82,28 @@ export async function initiateAuthFlow(email: string): Promise<InitiateResult> {
   let json: AuthorizeResponse;
   try {
     json = (await res.json()) as AuthorizeResponse;
-  } catch {
+  } catch (err) {
+    console.error('[initiateAuthFlow] Failed to parse response:', err);
     throw new AppError('ASGARDEO_PARSE_ERROR', 'Unexpected response from Asgardeo', 502);
   }
 
+  console.log('[initiateAuthFlow] Response:', { status: res.status, json });
+
   if (!res.ok || !json.flowId) {
+    const errorMsg = json.errorDescription ?? json.error ?? 'Failed to initiate auth flow';
+    console.error('[initiateAuthFlow] Error:', errorMsg);
     throw new AppError(
       'ASGARDEO_INITIATE_FAILED',
-      json.errorDescription ?? json.error ?? 'Failed to initiate auth flow',
+      errorMsg,
       502,
     );
   }
 
-  return { flowId: json.flowId, verifier };
+  const authenticators = json.nextStep?.authenticators ?? [];
+  console.log('[initiateAuthFlow] Success, flowId:', json.flowId);
+  console.log('[initiateAuthFlow] Available authenticators:', authenticators);
+
+  return { flowId: json.flowId, verifier, authenticators };
 }
 
 /**
@@ -87,14 +114,42 @@ export async function submitCredentials(
   flowId: string,
   email: string,
   password: string,
+  authenticators: Authenticator[],
 ): Promise<string> {
+  // Find the username+password authenticator from the available list.
+  // Look for one with 'username' and 'password' in requiredParams, or with idp='LOCAL'
+  const basicAuthenticator = authenticators.find(auth => {
+    const hasRequiredParams = (auth as Record<string, unknown>).requiredParams &&
+      Array.isArray((auth as Record<string, unknown>).requiredParams) &&
+      (auth as Record<string, unknown>).requiredParams.includes('username') &&
+      (auth as Record<string, unknown>).requiredParams.includes('password');
+
+    const isLocal = (auth as Record<string, unknown>).idp === 'LOCAL';
+
+    return hasRequiredParams || isLocal;
+  });
+
+  if (!basicAuthenticator) {
+    throw new AppError(
+      'NO_PASSWORD_AUTHENTICATOR',
+      'No password authenticator available for this application. Available: ' +
+        authenticators.map((a: Record<string, unknown>) => a.authenticator).join(', '),
+      502,
+    );
+  }
+
+  console.log('[submitCredentials] Using authenticator:', basicAuthenticator);
+
   const body = {
     flowId,
     selectedAuthenticator: {
-      authenticatorId: BASIC_AUTHENTICATOR_ID,
+      authenticatorId: basicAuthenticator.authenticatorId,
       params: { username: email, password },
     },
   };
+
+  console.log('[submitCredentials] POST to', `${config.asgardeo.baseUrl}/oauth2/authn`);
+  console.log('[submitCredentials] Body:', JSON.stringify(body, null, 2));
 
   const res = await fetch(`${config.asgardeo.baseUrl}/oauth2/authn`, {
     method: 'POST',
@@ -109,12 +164,17 @@ export async function submitCredentials(
     throw new AppError('ASGARDEO_PARSE_ERROR', 'Unexpected response from Asgardeo', 502);
   }
 
+  console.log('[submitCredentials] Response:', { status: res.status, json });
+
   // Distinguish upstream failures (5xx/4xx from Asgardeo) from wrong credentials.
   if (!res.ok) {
-    throw new AppError('ASGARDEO_AUTHN_FAILED', json.error ?? 'Upstream auth error', 502);
+    const errorMsg = json.error ?? 'Upstream auth error';
+    console.error('[submitCredentials] Error:', errorMsg, 'Status:', res.status);
+    throw new AppError('ASGARDEO_AUTHN_FAILED', errorMsg, 502);
   }
 
   if (json.flowStatus !== 'SUCCESS_COMPLETED') {
+    console.warn('[submitCredentials] Flow incomplete:', { flowStatus: json.flowStatus, nextStep: json.nextStep });
     throw new AppError(
       'INVALID_CREDENTIALS',
       'Invalid email or password',
@@ -171,6 +231,7 @@ export async function login(
   password: string,
 ): Promise<SessionUser> {
   if (config.mock.enabled) {
+    console.log('[asgardeo.login] Mock auth enabled, bypassing Asgardeo', { email });
     return {
       sub: 'mock-sub',
       email: email || config.mock.email,
@@ -179,8 +240,8 @@ export async function login(
     };
   }
 
-  const { flowId, verifier } = await initiateAuthFlow(email);
-  const code = await submitCredentials(flowId, email, password);
+  const { flowId, verifier, authenticators } = await initiateAuthFlow(email);
+  const code = await submitCredentials(flowId, email, password, authenticators);
   return exchangeCodeForSession(client, code, verifier);
 }
 

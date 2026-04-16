@@ -11,13 +11,15 @@ async function main(): Promise<void> {
     console.log('[BFF] Mock auth enabled — skipping Asgardeo OIDC discovery');
     client = {} as InstanceType<typeof Issuer.prototype.Client>;
   } else {
-    console.log(`[BFF] Discovering OIDC config at ${config.asgardeo.baseUrl}...`);
-    const issuer = await Issuer.discover(config.asgardeo.baseUrl);
+    const discoveryUrl = `${config.asgardeo.baseUrl}/oauth2/token/.well-known/openid-configuration`;
+    console.log(`[BFF] Discovering OIDC config at ${discoveryUrl}...`);
+    const issuer = await Issuer.discover(discoveryUrl);
     client = new issuer.Client({
       client_id: config.asgardeo.clientId,
       client_secret: config.asgardeo.clientSecret,
       redirect_uris: [config.asgardeo.redirectUri],
       response_types: ['code'],
+      token_endpoint_auth_method: 'none', // Public client using PKCE — no client secret required
     });
     console.log('[BFF] OIDC discovery complete');
   }
