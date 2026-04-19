@@ -12,6 +12,19 @@ declare module 'express-session' {
      * Populated after successful login and cleared on logout.
      */
     tokens: TokenState | undefined;
+    /**
+     * Auth flow state during PKCE initiate/submit steps.
+     * Stores flowId, verifier, and authenticators between /auth/initiate and /auth/submit.
+     * Cleared after successful token exchange.
+     */
+    authFlow:
+      | {
+          email: string;
+          flowId: string;
+          verifier: string;
+          authenticators: Array<{ authenticatorId: string; displayName?: string }>;
+        }
+      | undefined;
   }
 }
 

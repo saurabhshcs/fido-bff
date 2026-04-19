@@ -14,6 +14,23 @@ import { AppError } from '../middleware/errorHandler';
 import { SessionUser } from '../session';
 import { generateVerifier, generateChallenge } from './pkce';
 
+/**
+ * Obfuscate email for logging (privacy protection).
+ * Example: saurabhshcs@yahoo.com → saur***@yah***.com
+ */
+function obfuscateEmail(email: string): string {
+  const [local, domain] = email.split('@');
+  if (!local || !domain) return email;
+
+  const localVisible = Math.min(4, Math.max(1, Math.floor(local.length / 2)));
+  const domainParts = domain.split('.');
+  const domainName = domainParts[0];
+  const domainTld = domainParts[domainParts.length - 1];
+  const domainVisible = Math.min(3, domainName.length);
+
+  return `${local.substring(0, localVisible)}***@${domainName.substring(0, domainVisible)}***.${domainTld}`;
+}
+
 // The authenticatorId for BasicAuthenticator (username + password) in Asgardeo's
 // App-native API. This is a fixed base64-encoded value — does not change per tenant.
 const BASIC_AUTHENTICATOR_ID = 'QmFzaWNBdXRoZW50aWNhdG9y';
@@ -193,13 +210,13 @@ export async function submitCredentials(
 /**
  * Step 3: Exchange the authorization code for tokens using openid-client.
  * Validates the ID token signature against Asgardeo's JWKS.
- * Returns the session user extracted from ID token claims.
+ * Returns the session user extracted from ID token claims AND the token set.
  */
 export async function exchangeCodeForSession(
   client: Client,
   code: string,
   verifier: string,
-): Promise<SessionUser> {
+): Promise<{ user: SessionUser; idToken: string; accessToken: string }> {
   const tokenSet = await client.grant({
     grant_type: 'authorization_code',
     code,
@@ -209,34 +226,59 @@ export async function exchangeCodeForSession(
 
   const claims = tokenSet.claims();
 
+  const email = (claims.email as string | undefined) ?? '';
   const givenName = (claims.given_name as string | undefined) ?? '';
   const familyName = (claims.family_name as string | undefined) ?? '';
-  const fullName = `${givenName} ${familyName}`.trim();
+  const crmId = ((claims as Record<string, unknown>).crmId as string | null) ?? null;
 
-  return {
+  console.log('[exchangeCodeForSession] JWT claims:', {
+    given_name: givenName || '(not provided)',
+    family_name: familyName || '(not provided)',
+    email: email ? obfuscateEmail(email) : '(not provided)',
+    crmId: crmId || '(not provided)',
+  });
+
+  // Build display name: prefer full name, fall back to email prefix, then generic fallback
+  const fullName = `${givenName} ${familyName}`.trim();
+  const displayName = fullName || email.split('@')[0] || 'User';
+
+  const user: SessionUser = {
     sub: claims.sub,
-    email: (claims.email as string | undefined) ?? '',
-    displayName: fullName || ((claims.email as string | undefined)?.split('@')[0] ?? 'User'),
-    crmId: ((claims as Record<string, unknown>).crmId as string | null) ?? null,
+    email,
+    displayName,
+    crmId,
+  };
+
+  // Return both user profile and tokens for session storage and HttpOnly cookie
+  return {
+    user,
+    idToken: tokenSet.id_token ?? '',
+    accessToken: tokenSet.access_token ?? '',
   };
 }
 
 /**
  * Convenience wrapper: runs all three steps in sequence.
  * For mock mode (MOCK_AUTH=true), bypasses Asgardeo entirely.
+ * Returns user profile and tokens for session storage.
  */
 export async function login(
   client: Client,
   email: string,
   password: string,
-): Promise<SessionUser> {
+): Promise<{ user: SessionUser; idToken: string; accessToken: string }> {
   if (config.mock.enabled) {
     console.log('[asgardeo.login] Mock auth enabled, bypassing Asgardeo', { email });
-    return {
+    const user: SessionUser = {
       sub: 'mock-sub',
       email: email || config.mock.email,
       displayName: config.mock.displayName,
       crmId: config.mock.crmId,
+    };
+    return {
+      user,
+      idToken: 'mock-id-token',
+      accessToken: 'mock-access-token',
     };
   }
 
