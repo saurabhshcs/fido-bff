@@ -5,6 +5,7 @@ import { Client } from 'openid-client';
 import { config } from './config';
 import { sessionMiddleware } from './session';
 import { createAuthRouter } from './routes/auth';
+import { createFido2Router } from './routes/fido2';
 import { errorHandler } from './middleware/errorHandler';
 
 export function createApp(client: Client): express.Application {
@@ -30,6 +31,7 @@ export function createApp(client: Client): express.Application {
 
   // Routes
   app.use('/auth', createAuthRouter(client));
+  app.use('/auth', createFido2Router()); // Phase 2: FIDO2 biometric routes
 
   // Health check
   app.get('/health', (_req, res) => res.json({ ok: true }));

@@ -25,6 +25,20 @@ declare module 'express-session' {
           authenticators: Array<{ authenticatorId: string; displayName?: string }>;
         }
       | undefined;
+
+    // ─── FIDO2 / Phase 2 fields ───────────────────────────────────────────────
+    /** Trust tier: 1 = password-only, 2 = biometric-verified. */
+    trustTier?: 1 | 2;
+    /** Authentication method used to establish this session. */
+    authMethod?: 'pkce' | 'fido2';
+    /** WebAuthn sign counter — used to detect credential cloning. */
+    fido2SignCount?: number;
+    /** Stored credential ID after successful FIDO2 registration. */
+    fido2CredentialId?: string;
+    /** Base64url-encoded challenge issued during start-registration / start-assertion. */
+    fido2Challenge?: string;
+    /** Unix timestamp (ms) after which the challenge is considered expired. */
+    fido2ChallengeExpiry?: number;
   }
 }
 

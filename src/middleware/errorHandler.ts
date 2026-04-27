@@ -11,17 +11,21 @@ export class AppError extends Error {
   }
 }
 
-export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
   if (err instanceof AppError) {
-    res.status(err.httpStatus).json({ code: err.code, message: err.message });
+    console.error(`[BFF error] ${req.method} ${req.path} → ${err.code} (HTTP ${err.httpStatus}): ${err.message}`);
+    res.status(err.httpStatus).json({
+      success: false,
+      error: { code: err.code, message: err.message, statusCode: err.httpStatus },
+    });
     return;
   }
 
   // Upstream / network errors
   const status = (err as { status?: number }).status ?? 500;
-  console.error('[BFF error]', err);
+  console.error(`[BFF error] ${req.method} ${req.path} → INTERNAL_ERROR (HTTP ${status})`, err);
   res.status(status).json({
-    code: 'INTERNAL_ERROR',
-    message: 'An unexpected error occurred',
+    success: false,
+    error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred', statusCode: status },
   });
 };

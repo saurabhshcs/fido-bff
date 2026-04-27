@@ -210,17 +210,9 @@ export function createAuthRouter(client: Client): Router {
       const trimmedEmail = email.trim();
 
       try {
-        // Step 1: Initiate the auth flow
-        console.log('[POST /auth/login] Step 1: Initiating flow...');
-        const { flowId, verifier, authenticators } = await asgardeo.initiateAuthFlow(trimmedEmail);
-
-        // Step 2: Submit credentials
-        console.log('[POST /auth/login] Step 2: Submitting credentials...');
-        const code = await asgardeo.submitCredentials(flowId, trimmedEmail, password, authenticators);
-
-        // Step 3: Exchange code for tokens
-        console.log('[POST /auth/login] Step 3: Exchanging code for tokens...');
-        const { user, idToken, accessToken } = await asgardeo.exchangeCodeForSession(client, code, verifier);
+        // Delegates to asgardeo.login() which handles mock mode and the full PKCE flow.
+        console.log('[POST /auth/login] Calling asgardeo.login()...');
+        const { user, idToken, accessToken } = await asgardeo.login(client, trimmedEmail, password);
 
         // Store in session
         console.log('[POST /auth/login] Storing session');

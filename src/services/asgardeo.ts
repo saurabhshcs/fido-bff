@@ -57,10 +57,21 @@ interface AuthorizeResponse {
   errorDescription?: string;
 }
 
+interface AuthnMessage {
+  type?: string;
+  messageId?: string;
+  message?: string;
+  i18nKey?: string;
+  context?: unknown;
+}
+
 interface AuthnResponse {
   flowStatus?: string;
   authData?: { code?: string };
-  nextStep?: { authenticators?: Array<{ authenticatorId: string }> };
+  nextStep?: {
+    authenticators?: Array<{ authenticatorId: string }>;
+    messages?: AuthnMessage[];
+  };
   error?: string;
 }
 
@@ -136,12 +147,13 @@ export async function submitCredentials(
   // Find the username+password authenticator from the available list.
   // Look for one with 'username' and 'password' in requiredParams, or with idp='LOCAL'
   const basicAuthenticator = authenticators.find(auth => {
-    const hasRequiredParams = (auth as Record<string, unknown>).requiredParams &&
-      Array.isArray((auth as Record<string, unknown>).requiredParams) &&
-      (auth as Record<string, unknown>).requiredParams.includes('username') &&
-      (auth as Record<string, unknown>).requiredParams.includes('password');
+    const a = auth as unknown as Record<string, unknown>;
+    const hasRequiredParams =
+      Array.isArray(a['requiredParams']) &&
+      (a['requiredParams'] as string[]).includes('username') &&
+      (a['requiredParams'] as string[]).includes('password');
 
-    const isLocal = (auth as Record<string, unknown>).idp === 'LOCAL';
+    const isLocal = a['idp'] === 'LOCAL';
 
     return hasRequiredParams || isLocal;
   });
@@ -150,7 +162,7 @@ export async function submitCredentials(
     throw new AppError(
       'NO_PASSWORD_AUTHENTICATOR',
       'No password authenticator available for this application. Available: ' +
-        authenticators.map((a: Record<string, unknown>) => a.authenticator).join(', '),
+        authenticators.map(a => (a as unknown as Record<string, unknown>)['authenticator']).join(', '),
       502,
     );
   }
@@ -181,7 +193,8 @@ export async function submitCredentials(
     throw new AppError('ASGARDEO_PARSE_ERROR', 'Unexpected response from Asgardeo', 502);
   }
 
-  console.log('[submitCredentials] Response:', { status: res.status, json });
+  // Use JSON.stringify so nested objects (including messages[]) are fully expanded in logs.
+  console.log('[submitCredentials] Response:', JSON.stringify({ status: res.status, json }, null, 2));
 
   // Distinguish upstream failures (5xx/4xx from Asgardeo) from wrong credentials.
   if (!res.ok) {
@@ -191,10 +204,22 @@ export async function submitCredentials(
   }
 
   if (json.flowStatus !== 'SUCCESS_COMPLETED') {
-    console.warn('[submitCredentials] Flow incomplete:', { flowStatus: json.flowStatus, nextStep: json.nextStep });
+    // Extract the human-readable message Asgardeo sent in nextStep.messages[].
+    const asgardeoMessages = json.nextStep?.messages ?? [];
+    const asgardeoMessage = asgardeoMessages
+      .map(m => m.message ?? m.i18nKey ?? m.messageId)
+      .filter(Boolean)
+      .join('; ');
+
+    console.warn('[submitCredentials] Flow incomplete:', JSON.stringify({
+      flowStatus: json.flowStatus,
+      messages: asgardeoMessages,
+      nextStep: json.nextStep,
+    }, null, 2));
+
     throw new AppError(
       'INVALID_CREDENTIALS',
-      'Invalid email or password',
+      asgardeoMessage || 'Invalid email or password',
       401,
     );
   }

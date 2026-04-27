@@ -1,0 +1,31 @@
+# Node & Package Management
+node_modules/
+.pnpm-store/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build & Runtime Outputs
+dist/
+build/
+out/
+.tsbuildinfo
+
+# Development & IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+tsconfig.tsbuildinfo
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+terraform.tfstate*
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*

@@ -21,7 +21,7 @@ export const config = {
     clientId: asgardeoEnv('ASGARDEO_CLIENT_ID'),
     clientSecret: process.env.ASGARDEO_CLIENT_SECRET,
     redirectUri: asgardeoEnv('ASGARDEO_REDIRECT_URI'),
-    scopes: 'openid profile email',
+    scopes: 'openid profile email internal_login',
   },
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:8081',
   mock: {
@@ -29,5 +29,21 @@ export const config = {
     email: process.env.MOCK_EMAIL ?? 'demo@example.com',
     displayName: process.env.MOCK_DISPLAY_NAME ?? 'Demo User',
     crmId: process.env.MOCK_CRM_ID ?? 'CRM-mock-001',
+  },
+  fido2: {
+    /** Feature flag — set FIDO2_ENABLED=true to activate FIDO2 biometric routes. */
+    enabled: process.env.FIDO2_ENABLED === 'true',
+    /** Session duration in days, clamped to [1, 90]. Defaults to 15. */
+    sessionDurationDays: Math.max(1, Math.min(
+      parseInt(process.env.SESSION_DURATION_DAYS || '15', 10),
+      90,
+    )),
+    /**
+     * The RP origin (appId) sent to Asgardeo's FIDO2 API.
+     * Must match the trusted origin registered in the Asgardeo console.
+     * Defaults to the origin of the redirect URI (e.g. http://localhost:3001).
+     */
+    appId: process.env.FIDO2_APP_ID ??
+      new URL(mockEnabled ? 'http://localhost:3001/auth/callback' : (process.env.ASGARDEO_REDIRECT_URI ?? 'http://localhost:3001/auth/callback')).origin,
   },
 } as const;
